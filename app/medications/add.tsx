@@ -1,10 +1,10 @@
-import { useState, useRef } from "react";
+import React, { useState, useRef } from "react";
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Switch, Platform, Dimensions, Animated, Alert } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Link, useRouter } from "expo-router";
-import { addMedication } from "@/utils/storage";
+import { addMedication, clearAllData, getMedications } from "@/utils/storage";
 import { scheduleMedicationReminder } from "@/utils/notifications";
 
 const { width } = Dimensions.get("window");
@@ -62,6 +62,8 @@ export default function AddMedicationScreen() {
         times: ["09:00"],
         notes: "",
         reminderEnabled: true,
+        reminderRepeat: true,
+        repeatCount: "3",
         refillReminder: false,
         currentSupply: "",
         refillAt: "",
@@ -74,12 +76,16 @@ export default function AddMedicationScreen() {
         }
     };
 
-    const onTimeChange = (event: any, selectedTime?: Date) => {
+    const onTimeChange = (event: any, selectedTime?: Date, timeIndex: number = 0) => {
         setShowTimePicker(Platform.OS === 'ios');
         if (selectedTime) {
             const hours = selectedTime.getHours().toString().padStart(2, '0');
             const minutes = selectedTime.getMinutes().toString().padStart(2, '0');
-            setForm(prev => ({ ...prev, times: [`${hours}:${minutes}`] }));
+            const newTime = `${hours}:${minutes}`;
+            setForm(prev => ({
+                ...prev,
+                times: prev.times.map((time, index) => index === timeIndex ? newTime : time)
+            }));
         }
     };
 
@@ -89,10 +95,50 @@ export default function AddMedicationScreen() {
     const [selectedDuration, setSelectedDuration] = useState("");
     const [showTimePicker, setShowTimePicker] = useState(false);
     const [showDatePicker, setShowDatePicker] = useState(false);
+    const [selectedTimeIndex, setSelectedTimeIndex] = useState(0);
 
     const router = useRouter();
 
     const scrollY = useRef(new Animated.Value(0)).current;
+
+    // Check for existing data when component mounts
+    React.useEffect(() => {
+        checkExistingData();
+    }, []);
+
+    const checkExistingData = async () => {
+        try {
+            const existingMedications = await getMedications();
+            // Only show dialog if there are many medications (more than 5)
+            if (existingMedications.length > 5) {
+                Alert.alert(
+                    "Multiple Medications Found",
+                    `You have ${existingMedications.length} existing medications. Would you like to clear all data before adding new medications?`,
+                    [
+                        {
+                            text: "Keep Existing",
+                            style: "cancel",
+                        },
+                        {
+                            text: "Clear All Data",
+                            style: "destructive",
+                            onPress: async () => {
+                                try {
+                                    await clearAllData();
+                                    Alert.alert("Success", "All existing data has been cleared.");
+                                } catch (error) {
+                                    console.error("Error clearing data:", error);
+                                    Alert.alert("Error", "Failed to clear data. Please try again.");
+                                }
+                            },
+                        },
+                    ]
+                );
+            }
+        } catch (error) {
+            console.error("Error checking existing data:", error);
+        }
+    };
     const footerTranslateY = scrollY.interpolate({
         inputRange: [-1, 0, 100],
         outputRange: [0, 0, 100],
@@ -112,7 +158,7 @@ export default function AddMedicationScreen() {
                         onPress={() => {
 
                             setSelectedFrequency(freq.label);
-                            setForm({ ...form, frequency: freq.label });
+                            setForm({ ...form, frequency: freq.label, times: freq.times });
                         }}
                     >
                         <View style={[
@@ -213,16 +259,16 @@ export default function AddMedicationScreen() {
             const colors = ["#4CAF50", "#2196F3", "#FF9800", "#E91E63", "#9C27B0", "#3F51B5", "#009688", "#FF5722"];
             const ramdomColor = colors[Math.floor(Math.random() * colors.length)];
 
-            const medicationData = {
-                id: Math.random().toString(36).substr(2, 9),
-                ...form,
-                currentSupply: form.currentSupply ? Number(form.currentSupply) : 0,
-
-                totalSupply: form.currentSupply ? Number(form.currentSupply) : 0,
-                refillAt: form.refillAt ? Number(form.refillAt) : 0,
-                color: ramdomColor,
-                startDate: form.startDate.toISOString(),
-            }
+                         const medicationData = {
+                 id: Math.random().toString(36).substr(2, 9),
+                 ...form,
+                 currentSupply: form.currentSupply ? Number(form.currentSupply) : 0,
+                 totalSupply: form.currentSupply ? Number(form.currentSupply) : 0,
+                 refillAt: form.refillAt ? Number(form.refillAt) : 0,
+                 repeatCount: form.repeatCount ? Number(form.repeatCount) : 3,
+                 color: ramdomColor,
+                 startDate: form.startDate.toISOString(),
+             }
 
             await addMedication(medicationData);
 
@@ -367,17 +413,18 @@ export default function AddMedicationScreen() {
                             />
                         )}
 
-                        {form.frequency && form.frequency! == "As needed" && (
-
+                        {form.frequency && form.frequency !== "As needed" && (
                             <View style={styles.timesContainer}>
                                 <Text style={styles.timesTitle}>Medication Times</Text>
+                                <Text style={styles.timesSubtitle}>Tap to customize times</Text>
 
                                 {form.times.map((time, index) => (
                                     <TouchableOpacity
                                         key={index}
                                         style={styles.timeButton}
                                         onPress={() => {
-                                            setShowTimePicker(true)
+                                            setSelectedTimeIndex(index);
+                                            setShowTimePicker(true);
                                         }}
                                     >
                                         <View style={styles.timeIconContainer}>
@@ -399,11 +446,63 @@ export default function AddMedicationScreen() {
                             </View>
                         )}
 
+                        {form.frequency && form.frequency === "As needed" && (
+                            <View style={styles.timesContainer}>
+                                <Text style={styles.timesTitle}>Medication Times</Text>
+                                <Text style={styles.timesSubtitle}>Add times when you might need medication</Text>
+
+                                {form.times.map((time, index) => (
+                                    <TouchableOpacity
+                                        key={index}
+                                        style={styles.timeButton}
+                                        onPress={() => {
+                                            setSelectedTimeIndex(index);
+                                            setShowTimePicker(true);
+                                        }}
+                                    >
+                                        <View style={styles.timeIconContainer}>
+                                            <Ionicons
+                                                style={{ alignSelf: "center" }}
+                                                name="time"
+                                                size={24}
+                                                color={'#1a8e2d'}
+                                            />
+                                        </View>
+                                        <Text style={styles.timeButtonText}>{time}</Text>
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                setForm(prev => ({
+                                                    ...prev,
+                                                    times: prev.times.filter((_, i) => i !== index)
+                                                }));
+                                            }}
+                                            style={styles.removeTimeButton}
+                                        >
+                                            <Ionicons name="close-circle" size={20} color="#FF5252" />
+                                        </TouchableOpacity>
+                                    </TouchableOpacity>
+                                ))}
+
+                                <TouchableOpacity
+                                    style={styles.addTimeButton}
+                                    onPress={() => {
+                                        setForm(prev => ({
+                                            ...prev,
+                                            times: [...prev.times, "12:00"]
+                                        }));
+                                    }}
+                                >
+                                    <Ionicons name="add-circle-outline" size={20} color="#1a8e2d" />
+                                    <Text style={styles.addTimeButtonText}>Add Another Time</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
+
                         {showTimePicker && (
                             <DateTimePicker
                                 mode="time"
                                 value={(() => {
-                                    const [hours, minutes] = form.times[0].split(":").map(Number);
+                                    const [hours, minutes] = form.times[selectedTimeIndex].split(":").map(Number);
                                     const date = new Date();
                                     date.setHours(hours, minutes, 0, 0);
                                     return date;
@@ -411,15 +510,13 @@ export default function AddMedicationScreen() {
                                 onChange={(event, date) => {
                                     setShowTimePicker(false);
                                     if (date) {
-                                        const newTime = date.toLocaleTimeString('default', {
-                                            hour: '2-digit',
-                                            minute: '2-digit',
-                                            hour12: false,
-                                        });
+                                        const hours = date.getHours().toString().padStart(2, '0');
+                                        const minutes = date.getMinutes().toString().padStart(2, '0');
+                                        const newTime = `${hours}:${minutes}`;
                                         setForm((prev) => ({
                                             ...prev,
-                                            time: prev.times.map((t, i) => (i === 0 ? newTime : t)),
-                                        }))
+                                            times: prev.times.map((t, i) => (i === selectedTimeIndex ? newTime : t)),
+                                        }));
                                     }
                                 }}
                             />
@@ -451,9 +548,54 @@ export default function AddMedicationScreen() {
                                 />
                             </View>
                         </View>
-                    </View>
 
-                    {/* Refill Tracking */}
+                        {/* Repeat Option */}
+                        {form.reminderEnabled && (
+                            <View style={styles.card}>
+                                <View style={styles.switchRow}>
+                                    <View style={styles.switchlabelContainer}>
+                                        <View style={styles.iconContainer}>
+                                            <Ionicons style={{ alignSelf: "center" }} size={16} name="repeat" color={"#1a8e2d"} />
+                                        </View>
+                                        <View>
+                                            <Text style={styles.switchLabel}>Repeat Notifications</Text>
+                                            <Text style={styles.switchSubLabel}>
+                                                Send notifications repeatedly until medication is taken
+                                            </Text>
+                                        </View>
+                                    </View>
+                                    <Switch
+                                        value={form.reminderRepeat}
+                                        trackColor={{ false: "#ddd", true: "#1a8e2d" }}
+                                        thumbColor={'white'}
+                                        onValueChange={(value) =>
+                                            setForm({ ...form, reminderRepeat: value })
+                                        }
+                                    />
+                                </View>
+                                
+                                {/* Repeat Count Input */}
+                                {form.reminderRepeat && (
+                                    <View style={styles.repeatCountContainer}>
+                                        <Text style={styles.repeatCountLabel}>Number of repeats:</Text>
+                                        <TextInput
+                                            style={styles.repeatCountInput}
+                                            placeholder="0"
+                                            placeholderTextColor={'#999'}
+                                            value={form.repeatCount}
+                                            keyboardType="numeric"
+                                            onChangeText={(text) => {
+                                                // Only allow numbers
+                                                const numericValue = text.replace(/[^0-9]/g, '');
+                                                setForm({ ...form, repeatCount: numericValue })
+                                            }}
+                                        />
+                                        <Text style={styles.repeatCountSubtext}>times</Text>
+                                    </View>
+                                )}
+                            </View>
+                        )}
+                    </View>
 
                     {/* Notes */}
                     <View style={styles.section}>
@@ -520,7 +662,7 @@ export default function AddMedicationScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: "#f8f9fa",
+        // backgroundColor: "#f8f9fa",
         borderRadius: 10,
         marginBottom: 20,
     },
@@ -569,7 +711,7 @@ const styles = StyleSheet.create({
         paddingBottom: 45,
     },
     section: {
-        marginBottom: 25,
+        marginBottom: 20,
     },
     sectionTitle: {
         fontSize: 18,
@@ -703,6 +845,11 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: "600",
         color: "#333",
+        marginBottom: 5,
+    },
+    timesSubtitle: {
+        fontSize: 12,
+        color: "#666",
         marginBottom: 10,
     },
     timeButton: {
@@ -737,10 +884,32 @@ const styles = StyleSheet.create({
         fontSize: 16,
         color: "#333",
     },
+    removeTimeButton: {
+        padding: 5,
+    },
+    addTimeButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "#f8f9fa",
+        borderRadius: 16,
+        padding: 15,
+        marginTop: 10,
+        borderWidth: 1,
+        borderColor: "#e0e0e0",
+        borderStyle: "dashed",
+    },
+    addTimeButtonText: {
+        fontSize: 16,
+        color: "#1a8e2d",
+        fontWeight: "600",
+        marginLeft: 8,
+    },
     card: {
         backgroundColor: "white",
         borderRadius: 16,
         padding: 20,
+        marginBottom: 20,
         borderWidth: 1,
         borderColor: "#e0e0e0",
         shadowColor: "#000",
@@ -780,6 +949,7 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: "#666",
         marginTop: 2,
+        paddingRight: 20,
     },
     textAreaContainer: {
         backgroundColor: "white",
@@ -834,9 +1004,39 @@ const styles = StyleSheet.create({
         alignItems: "center",
         backgroundColor: "white",
     },
-    cancelButtonText: {
-        color: "#666",
-        fontSize: 16,
-        fontWeight: "600",
-    }
+         cancelButtonText: {
+         color: "#666",
+         fontSize: 16,
+         fontWeight: "600",
+     },
+     repeatCountContainer: {
+         flexDirection: "row",
+         alignItems: "center",
+         marginTop: 15,
+         paddingTop: 15,
+         borderTopWidth: 1,
+         borderTopColor: "#f0f0f0",
+     },
+     repeatCountLabel: {
+         fontSize: 14,
+         color: "#666",
+         marginRight: 10,
+     },
+     repeatCountInput: {
+         width: 60,
+         height: 40,
+         borderWidth: 1,
+         borderColor: "#e0e0e0",
+         borderRadius: 8,
+         paddingHorizontal: 10,
+         fontSize: 16,
+         color: "#333",
+         textAlign: "center",
+         backgroundColor: "#f8f9fa",
+     },
+     repeatCountSubtext: {
+         fontSize: 14,
+         color: "#666",
+         marginLeft: 8,
+     }
 })

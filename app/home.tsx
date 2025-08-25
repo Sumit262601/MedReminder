@@ -11,6 +11,7 @@ import {
   Alert,
   AppState,
 } from "react-native";
+import { GestureHandlerRootView, PanGestureHandler, State } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
 import { Link, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -138,6 +139,10 @@ export default function HomeScreen() {
   const [todaysMedications, setTodaysMedications] = useState<Medication[]>([]);
   const [completedDoses, setCompletedDoses] = useState(0);
   const [doseHistory, setDoseHistory] = useState<DoseHistory[]>([]);
+  
+  // Animation values for modal
+  const translateY = useRef(new Animated.Value(0)).current;
+  const modalHeight = useRef(new Animated.Value(0)).current;
 
   const loadMedications = useCallback(async () => {
     try {
@@ -145,6 +150,9 @@ export default function HomeScreen() {
         getMedications(),
         getTodaysDoses(),
       ]);
+
+      console.log("Loaded medications:", allMedications.length);
+      console.log("Today's doses:", todaysDoses.length);
 
       setDoseHistory(todaysDoses);
       setMedications(allMedications);
@@ -169,6 +177,7 @@ export default function HomeScreen() {
         return false;
       });
 
+      console.log("Today's medications:", todayMeds.length);
       setTodaysMedications(todayMeds);
 
       // Calculate completed doses
@@ -244,13 +253,60 @@ export default function HomeScreen() {
     );
   };
 
+  // Gesture handling for modal
+  const onGestureEvent = Animated.event(
+    [{ nativeEvent: { translationY: translateY } }],
+    { useNativeDriver: true }
+  );
+
+  const onHandlerStateChange = (event: any) => {
+    if (event.nativeEvent.oldState === State.ACTIVE) {
+      const { translationY } = event.nativeEvent;
+      
+      if (translationY > 100) {
+        // Close modal if dragged down more than 100px
+        Animated.timing(translateY, {
+          toValue: 500,
+          duration: 300,
+          useNativeDriver: true,
+        }).start(() => {
+          setShowNotifications(false);
+          translateY.setValue(0);
+        });
+      } else {
+        // Snap back to original position
+        Animated.spring(translateY, {
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+      }
+    }
+  };
+
+  const openModal = () => {
+    setShowNotifications(true);
+    translateY.setValue(0);
+  };
+
+  const closeModal = () => {
+    Animated.timing(translateY, {
+      toValue: 500,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      setShowNotifications(false);
+      translateY.setValue(0);
+    });
+  };
+
   const progress =
     todaysMedications.length > 0
       ? completedDoses / (todaysMedications.length * 2)
       : 0;
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       <LinearGradient colors={["#1a8e2d", "#146922"]} style={styles.header}>
         <View style={styles.headerContent}>
           <View style={styles.headerTop}>
@@ -259,7 +315,7 @@ export default function HomeScreen() {
             </View>
             <TouchableOpacity
               style={styles.notificationButton}
-              onPress={() => setShowNotifications(true)}
+              onPress={openModal}
             >
               <Ionicons name="notifications-outline" size={24} color="white" />
               {todaysMedications.length > 0 && (
@@ -384,41 +440,69 @@ export default function HomeScreen() {
         visible={showNotifications}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setShowNotifications(false)}
+        onRequestClose={closeModal}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Notifications</Text>
-              <TouchableOpacity
-                onPress={() => setShowNotifications(false)}
-                style={styles.closeButton}
-              >
-                <Ionicons name="close" size={24} color="#333" />
-              </TouchableOpacity>
-            </View>
-            {todaysMedications.map((medication) => (
-              <View key={medication.id} style={styles.notificationItem}>
-                <View style={styles.notificationIcon}>
-                  <Ionicons name="medical" size={24} color={medication.color} />
-                </View>
-                <View style={styles.notificationContent}>
-                  <Text style={styles.notificationTitle}>
-                    {medication.name}
-                  </Text>
-                  <Text style={styles.notificationMessage}>
-                    {medication.dosage}
-                  </Text>
-                  <Text style={styles.notificationTime}>
-                    {medication.times[0]}
-                  </Text>
-                </View>
+          <PanGestureHandler
+            onGestureEvent={onGestureEvent}
+            onHandlerStateChange={onHandlerStateChange}
+          >
+            <Animated.View 
+              style={[
+                styles.modalContent,
+                {
+                  transform: [{ translateY: translateY }]
+                }
+              ]}
+            >
+              <View style={styles.modalHeader}>
+                <View style={styles.dragHandle} />
+                <Text style={styles.modalTitle}>Notifications ({medications.length})</Text>
+                <TouchableOpacity
+                  onPress={closeModal}
+                  style={styles.closeButton}
+                >
+                  <Ionicons name="close" size={24} color="#333" />
+                </TouchableOpacity>
               </View>
-            ))}
-          </View>
+            <ScrollView
+              style={styles.notificationsScrollView}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.notificationsContent}
+            >
+              {medications.length > 0 ? (
+                medications.map((medication) => (
+                  <View key={medication.id} style={styles.notificationItem}>
+                    <View style={styles.notificationIcon}>
+                      <Ionicons name="medical" size={24} color={medication.color} />
+                    </View>
+                    <View style={styles.notificationContent}>
+                      <Text style={styles.notificationTitle}>
+                        {medication.name}
+                      </Text>
+                      <Text style={styles.notificationMessage}>
+                        {medication.dosage}
+                      </Text>
+                      <Text style={styles.notificationTime}>
+                        {medication.times.join(", ")}
+                      </Text>
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <View style={styles.emptyNotifications}>
+                  <Ionicons name="notifications-off-outline" size={48} color="#ccc" />
+                  <Text style={styles.emptyNotificationsText}>No medications found</Text>
+                  <Text style={styles.emptyNotificationsSubtext}>Add your first medication to get started</Text>
+                </View>
+              )}
+                          </ScrollView>
+            </Animated.View>
+          </PanGestureHandler>
         </View>
       </Modal>
-    </ScrollView>
+      </ScrollView>
+    </GestureHandlerRootView>
   );
 }
 
@@ -626,21 +710,41 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
     justifyContent: "flex-end",
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
   },
   modalContent: {
     backgroundColor: "white",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    maxHeight: "80%",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 30,
+    maxHeight: "90%",
+    minHeight: "50%",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 8,
   },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 20,
+    paddingHorizontal: 10,
+  },
+  dragHandle: {
+    position: "absolute",
+    top: -15,
+    left: "50%",
+    marginLeft: -25,
+    width: 50,
+    height: 6,
+    backgroundColor: "#ccc",
+    borderRadius: 3,
+    zIndex: 1,
   },
   modalTitle: {
     fontSize: 20,
@@ -684,6 +788,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#999",
   },
+  notificationsScrollView: {
+    flex: 1,
+  },
+  notificationsContent: {
+    paddingBottom: 20,
+  },
+  emptyNotifications: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 60,
+  },
+  emptyNotificationsText: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#666",
+    marginTop: 16,
+  },
+  emptyNotificationsSubtext: {
+    fontSize: 14,
+    color: "#999",
+    marginTop: 4,
+  },
   emptyState: {
     alignItems: "center",
     padding: 30,
@@ -722,4 +848,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginLeft: 4,
   },
+
 });

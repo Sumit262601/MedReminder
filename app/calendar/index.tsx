@@ -33,6 +33,14 @@ export default function CalendarScreen() {
         getMedications(),
         getDoseHistory(),
       ]);
+      console.log("Calendar loaded medications:", meds.length);
+      console.log("Calendar loaded dose history:", history.length);
+      
+      // Debug: Log medication details
+      meds.forEach(med => {
+        console.log(`Medication: ${med.name}, Start: ${med.startDate}, Duration: ${med.duration}`);
+      });
+      
       setMedications(meds);
       setDoseHistory(history);
     } catch (error) {
@@ -57,8 +65,8 @@ export default function CalendarScreen() {
   const { days, firstDay } = getDaysInMonth(selectedDate);
 
   const renderCalendar = () => {
-    const calendar: JSX.Element[] = [];
-    let week: JSX.Element[] = [];
+    const calendar: React.ReactElement[] = [];
+    let week: React.ReactElement[] = [];
 
     // Add empty cells for days before the first day of the month
     for (let i = 0; i < firstDay; i++) {
@@ -73,9 +81,8 @@ export default function CalendarScreen() {
         day
       );
       const isToday = new Date().toDateString() === date.toDateString();
-      const hasDoses = doseHistory.some(
-        (dose) =>
-          new Date(dose.timestamp).toDateString() === date.toDateString()
+      const hasScheduledMedications = medications.some(medication => 
+        isMedicationScheduledForDate(medication, date)
       );
 
       week.push(
@@ -84,14 +91,14 @@ export default function CalendarScreen() {
           style={[
             styles.calendarDay,
             isToday && styles.today,
-            hasDoses && styles.hasEvents,
+            hasScheduledMedications && styles.hasEvents,
           ]}
           onPress={() => setSelectedDate(date)}
         >
           <Text style={[styles.dayText, isToday && styles.todayText]}>
             {day}
           </Text>
-          {hasDoses && <View style={styles.eventDot} />}
+          {hasScheduledMedications && <View style={styles.eventDot} />}
         </TouchableOpacity>
       );
 
@@ -108,13 +115,73 @@ export default function CalendarScreen() {
     return calendar;
   };
 
+  const isMedicationScheduledForDate = (medication: Medication, date: Date): boolean => {
+    const startDate = new Date(medication.startDate);
+    const selectedDate = new Date(date);
+    
+    // Reset time to compare only dates
+    startDate.setHours(0, 0, 0, 0);
+    selectedDate.setHours(0, 0, 0, 0);
+    
+    // Check if the selected date is before the start date
+    if (selectedDate < startDate) {
+      console.log(`${medication.name}: Selected date ${selectedDate.toDateString()} is before start date ${startDate.toDateString()}`);
+      return false;
+    }
+    
+    // Check if medication is still active based on duration
+    if (medication.duration !== "Ongoing") {
+      const durationMatch = medication.duration.match(/(\d+)/);
+      if (durationMatch) {
+        const durationDays = parseInt(durationMatch[1]);
+        const endDate = new Date(startDate);
+        endDate.setDate(endDate.getDate() + durationDays - 1); // -1 because start date counts as day 1
+        
+        if (selectedDate > endDate) {
+          console.log(`${medication.name}: Selected date ${selectedDate.toDateString()} is after end date ${endDate.toDateString()}`);
+          return false;
+        }
+      }
+    }
+    
+    console.log(`${medication.name}: Scheduled for ${selectedDate.toDateString()}`);
+    return true;
+  };
+
+  const getScheduledTimesForDate = (medication: Medication, date: Date): string[] => {
+    if (!isMedicationScheduledForDate(medication, date)) {
+      return [];
+    }
+    
+    // For now, return all times. In a more advanced implementation,
+    // you could check specific days of the week or other patterns
+    return medication.times;
+  };
+
   const renderMedicationsForDate = () => {
     const dateStr = selectedDate.toDateString();
     const dayDoses = doseHistory.filter(
       (dose) => new Date(dose.timestamp).toDateString() === dateStr
     );
 
-    return medications.map((medication) => {
+    const scheduledMedications = medications.filter(medication => 
+      isMedicationScheduledForDate(medication, selectedDate)
+    );
+
+    if (scheduledMedications.length === 0) {
+      return (
+        <View style={styles.noMedicationsContainer}>
+          <Ionicons name="calendar-outline" size={48} color="#ccc" />
+          <Text style={styles.noMedicationsText}>No medications scheduled</Text>
+          <Text style={styles.noMedicationsSubtext}>
+            for {selectedDate.toLocaleDateString()}
+          </Text>
+        </View>
+      );
+    }
+
+    return scheduledMedications.map((medication) => {
+      const scheduledTimes = getScheduledTimesForDate(medication, selectedDate);
       const taken = dayDoses.some(
         (dose) => dose.medicationId === medication.id && dose.taken
       );
@@ -130,7 +197,13 @@ export default function CalendarScreen() {
           <View style={styles.medicationInfo}>
             <Text style={styles.medicationName}>{medication.name}</Text>
             <Text style={styles.medicationDosage}>{medication.dosage}</Text>
-            <Text style={styles.medicationTime}>{medication.times[0]}</Text>
+            <View style={styles.timesContainer}>
+              {scheduledTimes.map((time, index) => (
+                <Text key={index} style={styles.medicationTime}>
+                  {time}
+                </Text>
+              ))}
+            </View>
           </View>
           {taken ? (
             <View style={styles.takenBadge}>
@@ -173,7 +246,7 @@ export default function CalendarScreen() {
           >
             <Ionicons name="chevron-back" size={28} color="#1a8e2d" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Calendar</Text>
+          <Text style={styles.headerTitle}>Calendar test</Text>
         </View>
 
         <View style={styles.calendarContainer}>
@@ -286,18 +359,19 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
     borderRadius: 16,
     margin: 20,
-    padding: 15,
+    padding: 20,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 2,
+    maxHeight: 320,
   },
   monthHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 15,
+    marginBottom: 12,
   },
   monthText: {
     fontSize: 18,
@@ -306,28 +380,30 @@ const styles = StyleSheet.create({
   },
   weekdayHeader: {
     flexDirection: "row",
-    marginBottom: 10,
+    marginBottom: 8,
   },
   weekdayText: {
     flex: 1,
     textAlign: "center",
     color: "#666",
-    fontWeight: "500",
+    fontWeight: "600",
+    fontSize: 12,
   },
   calendarWeek: {
     flexDirection: "row",
-    marginBottom: 5,
+    marginBottom: 4,
   },
   calendarDay: {
     flex: 1,
-    aspectRatio: 1,
+    height: 35,
     justifyContent: "center",
     alignItems: "center",
     borderRadius: 8,
   },
   dayText: {
-    fontSize: 16,
+    fontSize: 14,
     color: "#333",
+    fontWeight: "500",
   },
   today: {
     backgroundColor: "#1a8e2d15",
@@ -340,12 +416,12 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   eventDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: "#1a8e2d",
     position: "absolute",
-    bottom: "15%",
+    bottom: "20%",
   },
   scheduleContainer: {
     flex: 1,
@@ -427,5 +503,26 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontSize: 14,
     marginLeft: 4,
+  },
+  noMedicationsContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
+  },
+  noMedicationsText: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#666",
+    marginTop: 16,
+  },
+  noMedicationsSubtext: {
+    fontSize: 14,
+    color: "#999",
+    marginTop: 4,
+  },
+  timesContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
   },
 });

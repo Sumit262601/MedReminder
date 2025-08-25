@@ -12,6 +12,8 @@ export interface Medication {
   duration: string;
   color: string;
   reminderEnabled: boolean;
+  reminderRepeat: boolean;
+  repeatCount: number;
   currentSupply: number;
   totalSupply: number;
   refillAt: number;
@@ -136,9 +138,69 @@ export async function recordDose(
 
 export async function clearAllData(): Promise<void> {
   try {
-    await AsyncStorage.multiRemove([MEDICATIONS_KEY, DOSE_HISTORY_KEY]);
+    // Clear all medication data
+    await AsyncStorage.removeItem(MEDICATIONS_KEY);
+    // Clear all dose history
+    await AsyncStorage.removeItem(DOSE_HISTORY_KEY);
+    console.log("All data cleared successfully");
   } catch (error) {
     console.error("Error clearing data:", error);
+    throw error;
+  }
+}
+
+export async function clearDataForDateRange(startDate: Date, endDate: Date): Promise<void> {
+  try {
+    const medications = await getMedications();
+    const doseHistory = await getDoseHistory();
+    
+    // Filter out medications that start within the date range
+    const filteredMedications = medications.filter(med => {
+      const medStartDate = new Date(med.startDate);
+      return medStartDate < startDate || medStartDate > endDate;
+    });
+    
+    // Filter out dose history within the date range
+    const filteredDoseHistory = doseHistory.filter(dose => {
+      const doseDate = new Date(dose.timestamp);
+      return doseDate < startDate || doseDate > endDate;
+    });
+    
+    // Save filtered data
+    await AsyncStorage.setItem(MEDICATIONS_KEY, JSON.stringify(filteredMedications));
+    await AsyncStorage.setItem(DOSE_HISTORY_KEY, JSON.stringify(filteredDoseHistory));
+    
+    console.log("Data cleared for date range:", startDate, "to", endDate);
+  } catch (error) {
+    console.error("Error clearing data for date range:", error);
+    throw error;
+  }
+}
+
+export async function clearOldData(beforeDate: Date): Promise<void> {
+  try {
+    const medications = await getMedications();
+    const doseHistory = await getDoseHistory();
+    
+    // Remove medications that started before the specified date
+    const filteredMedications = medications.filter(med => {
+      const medStartDate = new Date(med.startDate);
+      return medStartDate >= beforeDate;
+    });
+    
+    // Remove dose history before the specified date
+    const filteredDoseHistory = doseHistory.filter(dose => {
+      const doseDate = new Date(dose.timestamp);
+      return doseDate >= beforeDate;
+    });
+    
+    // Save filtered data
+    await AsyncStorage.setItem(MEDICATIONS_KEY, JSON.stringify(filteredMedications));
+    await AsyncStorage.setItem(DOSE_HISTORY_KEY, JSON.stringify(filteredDoseHistory));
+    
+    console.log("Old data cleared before:", beforeDate);
+  } catch (error) {
+    console.error("Error clearing old data:", error);
     throw error;
   }
 }

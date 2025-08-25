@@ -4,9 +4,10 @@ import { Medication } from "./storage";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 
@@ -68,13 +69,16 @@ export async function scheduleMedicationReminder(
         content: {
           title: "Medication Reminder",
           body: `Time to take ${medication.name} (${medication.dosage})`,
-          data: { medicationId: medication.id },
+          data: { 
+            medicationId: medication.id,
+            repeat: medication.reminderRepeat 
+          },
         },
         trigger: {
           hour: hours,
           minute: minutes,
-          repeats: true,
-        },
+          repeats: medication.reminderRepeat,
+        } as any,
       });
 
       return identifier;
